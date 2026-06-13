@@ -1,0 +1,143 @@
+{
+  "id": null,
+  "uid": "wifey-crawler-overview",
+  "title": "Web Crawler & Search Overview",
+  "tags": ["crawler", "search"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Crawl rate (pages/sec, by outcome)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(crawler_pages_fetched_total[1m])) by (outcome)",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Frontier queue depth",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "crawler_frontier_queue_depth", "legendFormat": "stream length", "refId": "A" },
+        { "expr": "crawler_frontier_pending_count", "legendFormat": "pending (claimed, unacked)", "refId": "B" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Index size (documents indexed)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "indexer_total_docs", "legendFormat": "total docs", "refId": "A" },
+        { "expr": "indexer_total_terms", "legendFormat": "total terms", "refId": "B" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Indexing throughput",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "rate(indexer_pages_indexed_total[1m])", "legendFormat": "pages indexed/sec", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Fetch duration (p50/p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(crawler_fetch_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(crawler_fetch_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Search API latency (p50/p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(api_search_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(api_search_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Politeness: robots-disallowed & rate-limited skips",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "rate(crawler_robots_disallowed_total[1m])", "legendFormat": "robots disallowed/sec", "refId": "A" },
+        { "expr": "rate(crawler_rate_limited_skips_total[1m])", "legendFormat": "rate-limited skips/sec", "refId": "B" },
+        { "expr": "rate(crawler_bloom_duplicate_total[1m])", "legendFormat": "bloom duplicates/sec", "refId": "C" }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Search requests/sec",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "sum(rate(api_search_requests_total[1m])) by (outcome)", "legendFormat": "{{outcome}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Pages crawled this session",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "crawler_pages_crawled_session", "refId": "A" }]
+    },
+    {
+      "id": 10,
+      "title": "Links discovered (total)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "crawler_links_discovered_total", "refId": "A" }]
+    },
+    {
+      "id": 11,
+      "title": "PageRank recomputations",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "indexer_pagerank_runs_total", "refId": "A" }]
+    }
+  ]
+}
