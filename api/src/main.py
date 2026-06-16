@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
     await state["pool"].close()
 
 
-app = FastAPI(title="wifey search API", lifespan=lifespan)
+app = FastAPI(title="Wayfind Search API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

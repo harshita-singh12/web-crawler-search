@@ -9,12 +9,8 @@ WORKDIR /app
 ARG VITE_API_BASE_URL=http://localhost:8000
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
-# No package-lock.json is committed (this repo was built without local npm
-# access to generate one), so `npm install` is used instead of `npm ci`.
-# If a lockfile is added later, switch this back to `npm ci` for reproducible,
-# faster builds.
-COPY package.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 RUN npm run build

@@ -79,7 +79,7 @@ export default function App() {
   return (
     <div className="page">
       <header className="header">
-        <h1 className="brand">wifey search</h1>
+        <h1 className="brand">Wayfind Search</h1>
         {stats && (
           <p className="stats-line">
             Searching {stats.total_docs.toLocaleString()} page

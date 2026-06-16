@@ -1,4 +1,4 @@
-name: wifey-web-crawler-search
+name: wayfind-search
 
 services:
   postgres:
