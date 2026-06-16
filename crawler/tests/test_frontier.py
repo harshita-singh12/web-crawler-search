@@ -1,6 +1,6 @@
 """Unit tests for the URL frontier's claiming semantics: exactly-once
 delivery across competing consumers, and crash recovery via the visibility
-timeout / XAUTOCLAIM reclaim path. See DESIGN.md section 1.
+timeout / XAUTOCLAIM reclaim path.
 
 Uses fakeredis's async Streams implementation instead of a real Redis
 server, since Frontier only depends on a redis-py-compatible client -- this

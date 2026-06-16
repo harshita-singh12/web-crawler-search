@@ -1,5 +1,5 @@
 """Distributed per-domain rate limiting shared across all worker processes
-via a single Redis key per domain. See DESIGN.md section 1.
+via a single Redis key per domain.
 
 The core trick is `SET key value NX PX ttl`: only one caller across the
 entire fleet can ever win that call in a given cooldown window, so "am I

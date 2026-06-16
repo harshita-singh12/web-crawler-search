@@ -1,5 +1,5 @@
-"""Postgres + MinIO access for the indexer service. See DESIGN.md section 3
-for the incremental-update algorithm this implements.
+"""Postgres + MinIO access for the indexer service, implementing the
+incremental postings/doc_freq update algorithm.
 """
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ class IndexStore:
 
                 # Recompute this doc's TF-IDF norm using post-update doc
                 # frequencies, so query-time cosine normalization is based on
-                # a consistent snapshot (see DESIGN.md section 3).
+                # a consistent snapshot.
                 total = await self.total_docs(conn)
                 if total == 0:
                     total = 1  # this doc itself now counts; avoid idf(0,0)

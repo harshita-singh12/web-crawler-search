@@ -19,10 +19,10 @@ MAX_RESULT_LIMIT = int(os.environ.get("MAX_RESULT_LIMIT", "50"))
 SNIPPET_CANDIDATE_COUNT = int(os.environ.get("SNIPPET_CANDIDATE_COUNT", "10"))
 
 # How much PageRank nudges the final ranking on top of TF-IDF relevance.
-# score = tfidf_score * (1 + alpha * pagerank). alpha=2.0 was chosen (see
-# DESIGN.md) so a well-linked page can meaningfully outrank a marginally
-# more keyword-dense but poorly-linked page, without letting link count
-# alone dominate a mismatched query -- tfidf_score still gates relevance.
+# score = tfidf_score * (1 + alpha * pagerank). alpha=2.0 was chosen so a
+# well-linked page can meaningfully outrank a marginally more keyword-dense
+# but poorly-linked page, without letting link count alone dominate a
+# mismatched query -- tfidf_score still gates relevance.
 PAGERANK_BOOST_ALPHA = float(os.environ.get("PAGERANK_BOOST_ALPHA", "2.0"))
 
 CORS_ALLOW_ORIGINS = [o.strip() for o in os.environ.get("CORS_ALLOW_ORIGINS", "*").split(",") if o.strip()]

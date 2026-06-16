@@ -6,9 +6,9 @@ hashing/lookup logic can be:
   - run in production with `RedisBitBackend`, so every crawler worker process
     shares one filter instead of each having its own in-memory copy.
 
-See DESIGN.md section 1 for why a Bloom filter (vs. a Redis SET of full URLs)
-was chosen: O(k) fixed-size bit operations per check instead of storing every
-URL string, at the cost of a small, tunable false-positive rate.
+A Bloom filter (vs. a Redis SET of full URLs) was chosen because it does O(k)
+fixed-size bit operations per check instead of storing every URL string, at
+the cost of a small, tunable false-positive rate.
 """
 from __future__ import annotations
 
@@ -100,8 +100,7 @@ class BloomFilter:
         which case it has now been added. Note this has a benign race under
         concurrency (two workers could both observe "new" for the same URL
         seen at almost the same instant); the Postgres UNIQUE(url) constraint
-        is the authoritative second line of defense against that, as noted in
-        DESIGN.md.
+        is the authoritative second line of defense against that.
         """
         if await self.might_contain(item):
             return False

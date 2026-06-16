@@ -1,6 +1,6 @@
 """The indexer service: a separate process from the crawler that turns
 crawled+stored HTML into the inverted index (terms/postings tables) and
-periodically recomputes PageRank. See DESIGN.md section 3.
+periodically recomputes PageRank.
 """
 from __future__ import annotations
 

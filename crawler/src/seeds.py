@@ -3,7 +3,8 @@
 Deliberately small, fixed, and thematically relevant (pages about crawling,
 search and information retrieval) so the demo crawl is self-describing.
 Changing this list is an explicit code change, not something reachable via
-any API -- see DESIGN.md section 0 for why that friction is intentional.
+any API -- that friction is intentional for a crawler that touches the live
+web.
 """
 
 SEED_URLS: list[str] = [

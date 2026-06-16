@@ -1,7 +1,6 @@
 """The URL frontier: a Redis Streams consumer group that lets many worker
 processes pull work without double-crawling, and recovers work abandoned by
-a crashed worker after a visibility timeout. See DESIGN.md section 1 for the
-full rationale.
+a crashed worker after a visibility timeout.
 
 Deliberately takes any redis-py-compatible async client (works with both
 `redis.asyncio.Redis` in production and `fakeredis.aioredis.FakeRedis` in
