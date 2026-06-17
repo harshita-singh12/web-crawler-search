@@ -19,6 +19,9 @@ RATE_LIMITED_SKIPS = Counter("crawler_rate_limited_skips_total", "Claims deferre
 BLOOM_DUPLICATES = Counter("crawler_bloom_duplicate_total", "URLs skipped as probable duplicates by the Bloom filter")
 LINKS_DISCOVERED = Counter("crawler_links_discovered_total", "Outgoing links discovered across all crawled pages")
 PAGES_CRAWLED_SESSION = Gauge("crawler_pages_crawled_session", "Pages successfully crawled in the current run")
+RETRIES_SCHEDULED = Counter(
+    "crawler_retries_scheduled_total", "Genuine HTTP failures for which a backoff retry was scheduled"
+)
 
 
 def start_metrics_server(port: int) -> None:

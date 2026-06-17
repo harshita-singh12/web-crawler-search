@@ -1,6 +1,6 @@
 """Central config for the crawler service, loaded from environment
-variables. See DESIGN.md section 0 ("Safety posture") for why the defaults
-are conservative.
+variables. Defaults are deliberately conservative since this crawls the
+live web -- see the README's safety note.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ RATE_LIMIT_RETRY_SLEEP_SECONDS = float(os.environ.get("RATE_LIMIT_RETRY_SLEEP_SE
 
 USER_AGENT = os.environ.get(
     "CRAWLER_USER_AGENT",
-    "wifey-search-bot/0.1 (+https://github.com/example/wifey; portfolio project, contact via repo)",
+    "wayfind-search-bot/0.1 (+https://github.com/harshita-singh12/wayfind-search; portfolio project, contact via repo)",
 )
 
 BLOOM_SIZE_BITS = int(os.environ.get("BLOOM_SIZE_BITS", str(1 << 23)))
@@ -51,6 +51,17 @@ BLOOM_NUM_HASHES = int(os.environ.get("BLOOM_NUM_HASHES", "7"))
 METRICS_PORT = int(os.environ.get("CRAWLER_METRICS_PORT", "9100"))
 
 RECRAWL_INTERVAL_HOURS = float(os.environ.get("RECRAWL_INTERVAL_HOURS", "24"))
+
+# Retries for genuine HTTP failures (404/500/timeout -- as opposed to a
+# crashed worker, which the frontier's visibility-timeout/XAUTOCLAIM
+# mechanism already handles independently of this). A page is retried with
+# capped exponential backoff -- base_delay * 2^(retry_count-1), capped at
+# max_delay -- up to MAX_RETRIES times before being permanently marked
+# 'failed'.
+MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))
+RETRY_BASE_DELAY_SECONDS = float(os.environ.get("RETRY_BASE_DELAY_SECONDS", "5"))
+RETRY_MAX_DELAY_SECONDS = float(os.environ.get("RETRY_MAX_DELAY_SECONDS", "300"))
+RETRY_SCHEDULER_POLL_SECONDS = float(os.environ.get("RETRY_SCHEDULER_POLL_SECONDS", "2"))
 
 STREAM_KEY = "frontier:urls"
 CONSUMER_GROUP = "crawlers"

@@ -1,5 +1,5 @@
 """Postgres (page/link/domain metadata) and MinIO (raw HTML) persistence for
-the crawler. See DESIGN.md section 2 for the schema.
+the crawler. See `db/init.sql` for the schema.
 """
 from __future__ import annotations
 
@@ -23,6 +23,28 @@ def url_hash(url: str) -> str:
 
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def compute_retry_outcome(
+    retry_count: int, max_retries: int, base_delay_seconds: float, max_delay_seconds: float
+) -> tuple[str, float | None]:
+    """Pure retry-with-backoff policy, factored out of `PageStore.record_failure`
+    so it can be unit tested without a database: given the retry_count *after*
+    incrementing for the failure that just happened, decide whether to
+    schedule another attempt or give up permanently, and if retrying, how
+    long to wait.
+
+    Backoff is capped exponential: base_delay * 2**(retry_count - 1), capped
+    at max_delay_seconds, so retry 1 waits ~base_delay, retry 2 waits
+    ~2*base_delay, etc., without ever exceeding max_delay_seconds.
+
+    Returns (outcome, delay_seconds): outcome is 'retry_scheduled' or
+    'failed'; delay_seconds is None when outcome is 'failed'.
+    """
+    if retry_count > max_retries:
+        return "failed", None
+    delay = min(base_delay_seconds * (2 ** (retry_count - 1)), max_delay_seconds)
+    return "retry_scheduled", delay
 
 
 class PageStore:
@@ -150,10 +172,69 @@ class PageStore:
             next_crawl_at,
         )
 
-    async def record_failure(self, page_id: int, http_status: int | None, error: str) -> None:
+    async def record_failure(
+        self,
+        page_id: int,
+        http_status: int | None,
+        error: str,
+        *,
+        max_retries: int,
+        base_delay_seconds: float,
+        max_delay_seconds: float,
+    ) -> str:
+        """Records a genuine HTTP failure (404/500/timeout -- as opposed to a
+        crashed worker, which the frontier's visibility-timeout/XAUTOCLAIM
+        mechanism already handles independently of this). Increments
+        `retry_count`; while it's within `max_retries` the page is put back to
+        'pending' with a capped-exponential-backoff `next_retry_at`, so the
+        retry scheduler (`due_for_retry`) re-enqueues it instead of giving up
+        immediately. Only once `retry_count` exceeds `max_retries` is the page
+        permanently marked 'failed'.
+
+        Returns 'retry_scheduled' or 'failed'.
+        """
+        row = await self.pool.fetchrow(
+            """
+            UPDATE pages SET
+                retry_count = retry_count + 1,
+                http_status = $2,
+                error = $3,
+                last_crawled_at = now()
+            WHERE id = $1
+            RETURNING retry_count
+            """,
+            page_id,
+            http_status,
+            error[:2000],
+        )
+        retry_count = row["retry_count"]
+        outcome, delay_seconds = compute_retry_outcome(retry_count, max_retries, base_delay_seconds, max_delay_seconds)
+
+        if outcome == "failed":
+            await self.pool.execute(
+                "UPDATE pages SET status = 'failed', next_retry_at = NULL WHERE id = $1",
+                page_id,
+            )
+            return "failed"
+
+        next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        await self.pool.execute(
+            "UPDATE pages SET status = 'pending', next_retry_at = $2 WHERE id = $1",
+            page_id,
+            next_retry_at,
+        )
+        return "retry_scheduled"
+
+    async def record_permanent_failure(self, page_id: int, http_status: int | None, error: str) -> None:
+        """Immediately marks a page 'failed' with no retry, bypassing the
+        retry budget. Used for unexpected internal errors while processing an
+        item (a bug, not a fetch failure), which shouldn't be conflated with
+        the retry-with-backoff path for genuine HTTP failures.
+        """
         await self.pool.execute(
             """
-            UPDATE pages SET status = 'failed', http_status = $2, error = $3, last_crawled_at = now()
+            UPDATE pages SET status = 'failed', http_status = $2, error = $3,
+                              last_crawled_at = now(), next_retry_at = NULL
             WHERE id = $1
             """,
             page_id,
@@ -200,6 +281,24 @@ class PageStore:
             SELECT id, url, domain, depth FROM pages
             WHERE status IN ('crawled', 'not_modified') AND next_crawl_at IS NOT NULL AND next_crawl_at <= now()
             ORDER BY next_crawl_at ASC
+            LIMIT $1
+            """,
+            limit,
+        )
+        return [dict(r) for r in rows]
+
+    async def due_for_retry(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Pages that failed a genuine HTTP fetch, are still within their
+        retry budget, and whose backoff window (`next_retry_at`) has elapsed.
+        `next_retry_at IS NOT NULL` is what distinguishes these from an
+        ordinary freshly-inserted 'pending' page that simply hasn't been
+        claimed yet (which never has `next_retry_at` set).
+        """
+        rows = await self.pool.fetch(
+            """
+            SELECT id, url, domain, depth FROM pages
+            WHERE status = 'pending' AND next_retry_at IS NOT NULL AND next_retry_at <= now()
+            ORDER BY next_retry_at ASC
             LIMIT $1
             """,
             limit,

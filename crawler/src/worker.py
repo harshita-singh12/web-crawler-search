@@ -1,5 +1,5 @@
 """The crawler worker: N concurrent asyncio tasks pulling from a shared
-Frontier, each doing fetch -> parse -> store -> expand. See DESIGN.md.
+Frontier, each doing fetch -> parse -> store -> expand.
 """
 from __future__ import annotations
 
@@ -61,6 +61,7 @@ class CrawlerWorker:
 
         tasks = [asyncio.create_task(self._worker_loop(i)) for i in range(config.NUM_WORKER_TASKS)]
         tasks.append(asyncio.create_task(self._recrawl_scheduler_loop()))
+        tasks.append(asyncio.create_task(self._retry_scheduler_loop()))
         tasks.append(asyncio.create_task(self._metrics_sampler_loop()))
         try:
             await asyncio.gather(*tasks)
@@ -114,7 +115,7 @@ class CrawlerWorker:
                     await self._process_item(item)
                 except Exception:
                     logger.exception("unhandled error processing %s", item.url)
-                    await self.pages.record_failure(item.page_id, None, "internal worker error")
+                    await self.pages.record_permanent_failure(item.page_id, None, "internal worker error")
                     await self.frontier.ack(item.entry_id)
 
     async def _page_cap_reached(self) -> bool:
@@ -155,9 +156,20 @@ class CrawlerWorker:
             return
 
         if result.status != 200 or result.html is None:
-            outcome = "error" if result.status == 0 else f"http_{result.status}"
-            metrics.PAGES_FETCHED.labels(outcome=outcome).inc()
-            await self.pages.record_failure(item.page_id, result.status or None, result.error or "unknown error")
+            label = "error" if result.status == 0 else f"http_{result.status}"
+            outcome = await self.pages.record_failure(
+                item.page_id,
+                result.status or None,
+                result.error or "unknown error",
+                max_retries=config.MAX_RETRIES,
+                base_delay_seconds=config.RETRY_BASE_DELAY_SECONDS,
+                max_delay_seconds=config.RETRY_MAX_DELAY_SECONDS,
+            )
+            if outcome == "retry_scheduled":
+                metrics.PAGES_FETCHED.labels(outcome=f"{label}_retry").inc()
+                metrics.RETRIES_SCHEDULED.inc()
+            else:
+                metrics.PAGES_FETCHED.labels(outcome=label).inc()
             await self.frontier.ack(item.entry_id)
             return
 
@@ -209,6 +221,22 @@ class CrawlerWorker:
             except Exception:
                 logger.exception("recrawl scheduler iteration failed")
             await asyncio.sleep(60)
+
+    async def _retry_scheduler_loop(self) -> None:
+        """Re-enqueues pages whose backoff window (`next_retry_at`) after a
+        genuine HTTP failure has elapsed. Polls much more often than the
+        re-crawl scheduler since retry delays start as low as
+        RETRY_BASE_DELAY_SECONDS (a few seconds), not hours.
+        """
+        while not self._stop.is_set():
+            try:
+                due = await self.pages.due_for_retry(limit=50)
+                for row in due:
+                    domain = row["domain"]
+                    await self.frontier.enqueue(row["url"], domain, row["depth"], row["id"], None)
+            except Exception:
+                logger.exception("retry scheduler iteration failed")
+            await asyncio.sleep(config.RETRY_SCHEDULER_POLL_SECONDS)
 
     async def _metrics_sampler_loop(self) -> None:
         while not self._stop.is_set():

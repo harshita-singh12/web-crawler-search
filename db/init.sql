@@ -1,6 +1,6 @@
 -- Schema for the distributed web crawler + search engine.
 -- Applied automatically by the postgres container on first boot (mounted into
--- /docker-entrypoint-initdb.d/). See DESIGN.md section 2 for rationale.
+-- /docker-entrypoint-initdb.d/).
 
 CREATE TABLE IF NOT EXISTS domains (
     domain            TEXT PRIMARY KEY,
@@ -32,11 +32,14 @@ CREATE TABLE IF NOT EXISTS pages (
     first_crawled_at  TIMESTAMPTZ,
     last_crawled_at   TIMESTAMPTZ,
     next_crawl_at     TIMESTAMPTZ,
-    error             TEXT
+    error             TEXT,
+    retry_count       INT NOT NULL DEFAULT 0,     -- genuine HTTP failures (404/500/timeout) on this page
+    next_retry_at     TIMESTAMPTZ                 -- capped-exponential-backoff "not before" for the next retry
 );
 
 CREATE INDEX IF NOT EXISTS idx_pages_domain_status ON pages(domain, status);
 CREATE INDEX IF NOT EXISTS idx_pages_next_crawl_at ON pages(next_crawl_at);
+CREATE INDEX IF NOT EXISTS idx_pages_next_retry_at ON pages(next_retry_at);
 CREATE INDEX IF NOT EXISTS idx_pages_url_hash ON pages(url_hash);
 CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status);
 
