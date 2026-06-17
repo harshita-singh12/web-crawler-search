@@ -1,17 +1,18 @@
-#  web crawler + search engine
+# Wayfind Search
 
 A small, distributed web crawler and search engine: async Python crawler workers, a
 Redis-Streams URL frontier, PostgreSQL metadata store, a Postgres-backed inverted index with
 TF-IDF + PageRank ranking, raw-page storage in MinIO, a FastAPI search API, a React search UI, and
 Prometheus/Grafana monitoring.
 
-Full design rationale (frontier claiming, DB schema, inverted index structure) is in
-[`DESIGN.md`](./DESIGN.md) -- read that first if you want the "why", not just the "what".
+Design rationale for the frontier, schema, and inverted index lives alongside the code, not in a
+separate document -- see the "Frontier design" section below, and the module docstrings in
+`crawler/src/`, `indexer/src/`, and `db/init.sql`.
 
 **Safety note**: this crawls the live web. It's hard-configured to crawl a small, fixed list of
 ~8 Wikipedia/documentation pages, to a max depth of 2, capped at 200 pages, with a minimum 3s
-per-domain delay and full robots.txt compliance. See `DESIGN.md` section 0 for the full rationale.
-Don't repoint this at arbitrary sites without re-reading that section.
+per-domain delay and full robots.txt compliance (see `crawler/src/config.py` and
+`crawler/src/seeds.py`). Don't repoint this at arbitrary sites without re-checking those defaults.
 
 ## Architecture
 
@@ -54,6 +55,14 @@ Each of crawler / indexer / api / frontend is a separate service with its own Do
 composed together with `docker-compose.yml`. `common/` is a small shared Python library
 (tokenizer, TF-IDF math, Bloom filter, URL/HTML helpers) imported by crawler, indexer and api --
 it has no I/O of its own, which is what makes it unit-testable without any infrastructure.
+
+Two infra choices worth calling out: the inverted index (`terms`/`postings`) lives in Postgres
+itself rather than a separate Whoosh index, for free transactional incremental updates and one
+fewer client library/query path in the API service; and the frontier queue is Redis Streams
+rather than RabbitMQ, since it's the simpler starting point that still gives consumer groups
+(competing consumers), acknowledgement, and automatic reclaiming of abandoned work out of the
+box -- and this system already needs Redis for the bloom filter and rate limiter, so it's zero
+marginal infra cost.
 
 ## Running it
 
@@ -138,14 +147,16 @@ done
 ```
 
 **Testing philosophy**: the required units under test -- the tokenizer/TF-IDF scorer, the Bloom
-filter, and the frontier's claim/reclaim logic -- are all tested against fast, in-process fakes
-(`InMemoryBitBackend` for the Bloom filter, `fakeredis` for the Redis Streams frontier) rather
-than live Postgres/Redis containers. This was a deliberate choice: it keeps the suite at
-sub-second runtime and makes it runnable with zero infrastructure, while still exercising the real
-hashing/claiming algorithms (fakeredis implements actual XADD/XREADGROUP/XAUTOCLAIM semantics, not
-a mock). End-to-end correctness against the *real* Postgres/Redis/MinIO is instead verified by
-actually running `docker compose up` and issuing a real crawl + search (see below) -- that's a
-deliberate integration-test/unit-test split, not a gap.
+filter, the frontier's claim/reclaim logic, and the retry-with-backoff policy -- are all tested
+against fast, in-process fakes (`InMemoryBitBackend` for the Bloom filter, `fakeredis` for the
+Redis Streams frontier, an in-memory fake asyncpg pool for the retry integration test) rather than
+live Postgres/Redis containers. This was a deliberate choice: it keeps the suite at sub-second
+runtime and makes it runnable with zero infrastructure, while still exercising the real
+hashing/claiming/retry algorithms (fakeredis implements actual XADD/XREADGROUP/XAUTOCLAIM
+semantics, not a mock, and the retry tests drive the real `CrawlerWorker`/`PageStore` code against
+a scripted flaky upstream). End-to-end correctness against the *real* Postgres/Redis/MinIO is
+instead verified by actually running `docker compose up` and issuing a real crawl + search (see
+below) -- that's a deliberate integration-test/unit-test split, not a gap.
 
 ## Frontier design (summary)
 
@@ -155,9 +166,16 @@ for free -- that's Redis's own delivery guarantee, not something hand-rolled. Cr
 longer than `VISIBILITY_TIMEOUT_MS` (5 minutes by default), which is the same "visibility timeout"
 concept SQS uses. Duplicate URLs are filtered before they're even enqueued, via a Redis-backed
 Bloom filter shared by all workers, with a Postgres `UNIQUE(url)` constraint as a second,
-authoritative line of defense against the Bloom filter's small false-positive rate. Full detail,
-including the distributed per-domain rate limiter and how robots.txt is respected, is in
-[`DESIGN.md`](./DESIGN.md#1-url-frontier-design).
+authoritative line of defense against the Bloom filter's small false-positive rate.
+
+Politeness/rate limiting is enforced at claim-time, not enqueue-time: rather than never enqueuing a
+URL until its domain is free (which would require a per-domain scheduler), a worker that claims a
+URL for a still-cooling-down domain puts it back on the stream and moves on. This is simpler to
+implement correctly with Redis Streams' primitives, at the cost of a little wasted claim/requeue
+churn under heavy contention for one domain -- acceptable given the crawl is intentionally small
+and slow by default. The distributed rate limiter itself (`crawler/src/rate_limiter.py`) uses a
+single Redis key per domain written with `SET key <expiry> NX PX <delay_ms>`, so "is this domain
+free right now" is an atomic check-and-set across every worker process.
 
 ## Re-crawl scheduling
 
@@ -172,11 +190,28 @@ re-storing, or re-indexing anything the site itself says hasn't changed. This me
 frequency is decoupled from indexing cost -- a page that never changes costs one cheap conditional
 GET per interval, forever.
 
+## Retry policy
+
+A genuine HTTP failure (404/500/timeout -- as opposed to a crashed *worker*, which is a separate
+concern already handled by the frontier's visibility-timeout/`XAUTOCLAIM` mechanism above) is
+retried with capped exponential backoff instead of being marked `failed` immediately. Each `pages`
+row tracks `retry_count` and `next_retry_at`; on a failure, `PageStore.record_failure`
+(`crawler/src/storage.py`) increments `retry_count` and, while it's within `MAX_RETRIES` (3 by
+default), schedules the next attempt at `RETRY_BASE_DELAY_SECONDS * 2**(retry_count - 1)` seconds
+out, capped at `RETRY_MAX_DELAY_SECONDS` (5 minutes by default) -- so retry 1 waits ~5s, retry 2
+~10s, retry 3 ~20s, and so on, without ever hammering a broken URL at full speed. A dedicated
+`_retry_scheduler_loop` in `crawler/src/worker.py` polls for pages whose backoff window has
+elapsed and re-enqueues them onto the same frontier stream, the same "not-before timestamp the
+claim path respects" pattern re-crawl scheduling already uses above. Only once `retry_count`
+exceeds `MAX_RETRIES` is a page permanently marked `failed`. All three knobs
+(`MAX_RETRIES`, `RETRY_BASE_DELAY_SECONDS`, `RETRY_MAX_DELAY_SECONDS`) are environment variables;
+see `crawler/src/config.py`.
+
 ## Sharding the inverted index
 
 The current design keeps `terms`/`postings` as ordinary Postgres tables on the same node as the
-rest of the metadata (see `DESIGN.md` section 3 for why that was the right call at this project's
-scale). If the corpus outgrew a single node, here's how I'd shard it:
+rest of the metadata, which is the right call at this project's scale (hundreds of documents,
+single-node Postgres). If the corpus outgrew a single node, here's how I'd shard it:
 
 1. **Partition by term, not by document.** The query path is "look up postings for a handful of
    query terms", so a term-sharded index lets a query only fan out to the shards that actually
@@ -214,31 +249,6 @@ scale). If the corpus outgrew a single node, here's how I'd shard it:
    vs. data-fetching) is exactly why `ranking.py` was written to take plain dicts instead of a
    database connection.
 
-## Deviations from the original spec, and why
-
-- **Inverted index storage**: built as Postgres tables (`terms`/`postings`) rather than Whoosh.
-  The spec explicitly allows either. Rationale in `DESIGN.md` section 3 -- mainly: free
-  transactional incremental updates, and one fewer client library/query path in the API service.
-- **Queue**: Redis Streams, as the spec's own suggested simpler-than-RabbitMQ starting point.
-- **Frontier claim-time rate limiting**: rather than never enqueuing a URL until its domain is free
-  (which would require a per-domain scheduler), a worker that claims a URL for a still-cooling-down
-  domain puts it back on the stream and moves on. Simpler to implement correctly with Redis
-  Streams' primitives, at the cost of a little wasted claim/requeue churn under heavy contention
-  for one domain -- acceptable given the crawl is intentionally small and slow by default.
-- **Retries for real HTTP failures** (a genuine 404/500/timeout, as opposed to a crashed worker):
-  a page is marked `failed` and not automatically retried within the same run. The frontier's
-  crash-recovery (visibility timeout) mechanism is about *worker* failures, not *page* failures --
-  conflating the two would risk hammering a consistently-broken URL. This is a reasonable
-  simplification for a portfolio project; a production system would add capped exponential
-  backoff retries with a separate `retry_count` column.
-- **No package-lock.json committed** for the frontend: the sandbox this was built in has no local
-  Node/npm, so `npm install` (not `npm ci`) is used in the frontend Dockerfile. Fine for a
-  from-scratch build; a real project would commit the lockfile the first time `npm install` runs
-  and switch to `npm ci` for reproducible builds after that.
-- **No secrets are fabricated anywhere.** `.env.example` uses obviously-placeholder values
-  (`changeme_local_dev_only`, `minioadmin`), `.env` itself is gitignored, and there is no code path
-  that requires a real external API key (no third-party LLM/API calls anywhere in this project).
-
 ## Project layout
 
 ```
@@ -250,5 +260,4 @@ api/        FastAPI search endpoint
 frontend/   Vite + React + TypeScript search UI
 db/         init.sql schema, applied automatically by the postgres container
 monitoring/ prometheus.yml + Grafana provisioning (datasource + dashboard, auto-loaded)
-DESIGN.md   frontier / schema / inverted-index design, written before implementation
 ```
