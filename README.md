@@ -1,4 +1,4 @@
-# wifey web crawler + search engine
+#  web crawler + search engine
 
 A small, distributed web crawler and search engine: async Python crawler workers, a
 Redis-Streams URL frontier, PostgreSQL metadata store, a Postgres-backed inverted index with
