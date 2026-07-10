@@ -276,12 +276,27 @@ class PageStore:
         return int(row["c"])
 
     async def due_for_recrawl(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Selects pages due for re-crawl and atomically clears
+        `next_crawl_at` in the same statement (`FOR UPDATE SKIP LOCKED` plus
+        the UPDATE) so a page is claimed by exactly one caller. Without this,
+        two crawler container replicas independently polling this table (or
+        even a single replica's next poll landing before this batch finishes
+        being enqueued/processed) would both select and re-enqueue the same
+        due page, since a plain SELECT doesn't stop it from being "due" again
+        on the next poll.
+        """
         rows = await self.pool.fetch(
             """
-            SELECT id, url, domain, depth FROM pages
-            WHERE status IN ('crawled', 'not_modified') AND next_crawl_at IS NOT NULL AND next_crawl_at <= now()
-            ORDER BY next_crawl_at ASC
-            LIMIT $1
+            UPDATE pages SET next_crawl_at = NULL
+            WHERE id IN (
+                SELECT id FROM pages
+                WHERE status IN ('crawled', 'not_modified')
+                  AND next_crawl_at IS NOT NULL AND next_crawl_at <= now()
+                ORDER BY next_crawl_at ASC
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING id, url, domain, depth
             """,
             limit,
         )
@@ -293,13 +308,25 @@ class PageStore:
         `next_retry_at IS NOT NULL` is what distinguishes these from an
         ordinary freshly-inserted 'pending' page that simply hasn't been
         claimed yet (which never has `next_retry_at` set).
+
+        Atomically clears `next_retry_at` on selection (`FOR UPDATE SKIP
+        LOCKED` plus the UPDATE), for the same reason `due_for_recrawl` does:
+        a plain SELECT would let the same due page be picked up again by the
+        next poll (this loop runs every couple of seconds) or by another
+        crawler replica before the first re-enqueued copy is even claimed,
+        producing duplicate frontier entries for one page.
         """
         rows = await self.pool.fetch(
             """
-            SELECT id, url, domain, depth FROM pages
-            WHERE status = 'pending' AND next_retry_at IS NOT NULL AND next_retry_at <= now()
-            ORDER BY next_retry_at ASC
-            LIMIT $1
+            UPDATE pages SET next_retry_at = NULL
+            WHERE id IN (
+                SELECT id FROM pages
+                WHERE status = 'pending' AND next_retry_at IS NOT NULL AND next_retry_at <= now()
+                ORDER BY next_retry_at ASC
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING id, url, domain, depth
             """,
             limit,
         )
