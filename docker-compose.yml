@@ -69,8 +69,10 @@ services:
       NUM_WORKER_TASKS: ${NUM_WORKER_TASKS:-4}
       ALLOW_OFFSITE_LINKS: ${ALLOW_OFFSITE_LINKS:-false}
       RECRAWL_INTERVAL_HOURS: ${RECRAWL_INTERVAL_HOURS:-24}
-    ports:
-      - "${CRAWLER_METRICS_PORT:-9100}:9100"
+    # No host port mapping here (unlike indexer/api below): Prometheus reaches
+    # this over the internal docker network at crawler:9100, and a static
+    # host-port mapping would break `docker compose up --scale crawler=N`
+    # (every replica would fight over the same host port).
     restart: unless-stopped
 
   indexer:

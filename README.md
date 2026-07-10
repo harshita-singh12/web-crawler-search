@@ -231,11 +231,11 @@ single-node Postgres). If the corpus outgrew a single node, here's how I'd shard
    each shard's local stats scaled by shard count, which is what several production distributed
    search systems (e.g. Elasticsearch's default "distributed IDF" behavior) actually do in
    practice, trading a small ranking approximation for not needing global coordination.
-2. **Page metadata (`pages`, `links`) would shard by `page_id % num_shards`** instead (a
+4. **Page metadata (`pages`, `links`) would shard by `page_id % num_shards`** instead (a
    completely different axis from the term shards above) since it's looked up by page id, not by
    term, once the top-N ranked ids are known -- fetching titles/snippets for a small result set is
    cheap to fan out to whichever shards own those ids.
-3. **The crawler/indexer side is embarrassingly parallel already**: crawler workers are stateless
+5. **The crawler/indexer side is embarrassingly parallel already**: crawler workers are stateless
    and horizontally scaled today (`NUM_WORKER_TASKS` per process, and multiple `crawler` container
    replicas via `docker compose up --scale crawler=N`); the indexer would need to become
    shard-aware (route a page's postings writes to `hash(term) % num_shards` per term while
@@ -243,7 +243,7 @@ single-node Postgres). If the corpus outgrew a single node, here's how I'd shard
    of every other page's, so indexer replicas also just need `page_id`-based work partitioning
    (e.g. via `pg_advisory_lock` or, better, its own consumer-group stream mirroring the frontier's
    pattern) to run in parallel safely.
-4. In short: the `common/tfidf.py` and `api/src/ranking.py` scoring math doesn't change at all
+6. In short: the `common/tfidf.py` and `api/src/ranking.py` scoring math doesn't change at all
    under sharding -- only *where the postings/doc_freq dicts it operates on come from* changes,
    from "one SQL query" to "fan-out + merge across shards". That separation (pure scoring function
    vs. data-fetching) is exactly why `ranking.py` was written to take plain dicts instead of a
