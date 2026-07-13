@@ -16,7 +16,6 @@ MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "raw-pages")
 
 DEFAULT_RESULT_LIMIT = int(os.environ.get("DEFAULT_RESULT_LIMIT", "10"))
 MAX_RESULT_LIMIT = int(os.environ.get("MAX_RESULT_LIMIT", "50"))
-SNIPPET_CANDIDATE_COUNT = int(os.environ.get("SNIPPET_CANDIDATE_COUNT", "10"))
 
 # How much PageRank nudges the final ranking on top of TF-IDF relevance.
 # score = tfidf_score * (1 + alpha * pagerank). alpha=2.0 was chosen so a

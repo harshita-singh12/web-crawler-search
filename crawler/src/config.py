@@ -37,7 +37,6 @@ ALLOW_OFFSITE_LINKS = _bool("ALLOW_OFFSITE_LINKS", False)
 NUM_WORKER_TASKS = int(os.environ.get("NUM_WORKER_TASKS", "4"))
 REQUEST_TIMEOUT_SECONDS = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "15"))
 VISIBILITY_TIMEOUT_MS = int(os.environ.get("VISIBILITY_TIMEOUT_MS", str(5 * 60 * 1000)))
-CLAIM_BLOCK_MS = int(os.environ.get("CLAIM_BLOCK_MS", "5000"))
 RATE_LIMIT_RETRY_SLEEP_SECONDS = float(os.environ.get("RATE_LIMIT_RETRY_SLEEP_SECONDS", "0.5"))
 
 USER_AGENT = os.environ.get(
