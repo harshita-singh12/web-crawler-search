@@ -2,10 +2,10 @@
 
 export interface SearchResult {
   url: string;
-  title: string;
+  title: string | null;
   snippet: string;
   score: number;
-  domain: string;
+  domain: string | null;
   pagerank: number;
 }
 
@@ -23,5 +23,5 @@ export interface ApiErrorBody {
 export interface StatsResponse {
   total_docs: number;
   total_terms: number;
-  last_crawl_at: string;
+  last_crawl_at: string | null;
 }

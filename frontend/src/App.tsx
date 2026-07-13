@@ -5,7 +5,7 @@ import type { SearchResponse, StatsResponse } from "./types";
 
 type Status = "idle" | "loading" | "success" | "error";
 
-function domainFromResult(url: string, domain: string): string {
+function domainFromResult(url: string, domain: string | null): string {
   if (domain) return domain;
   try {
     return new URL(url).hostname;
