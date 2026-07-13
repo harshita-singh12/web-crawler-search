@@ -8,9 +8,10 @@ from dataclasses import dataclass
 
 import aiohttp
 
-MAX_CONTENT_BYTES = 5 * 1024 * 1024  # 5MB: skip anything larger than this to
-# keep the demo crawl fast and avoid ever trying to tokenize e.g. a
-# mis-served binary file.
+MAX_CONTENT_BYTES = 5 * 1024 * 1024  # 5MB: truncate anything larger than this
+# to keep the demo crawl fast and avoid ever trying to tokenize e.g. a
+# mis-served binary file. The page is still processed on whatever was read up
+# to this cap, not discarded.
 
 
 @dataclass
