@@ -11,6 +11,7 @@ import aiohttp
 import redis.asyncio as aioredis
 
 from . import config, metrics
+from .ssrf_guard import SSRFSafeResolver
 from .storage import ObjectStore, PageStore
 from .worker import CrawlerWorker
 
@@ -58,7 +59,9 @@ async def main() -> None:
     page_store = await _wait_for_postgres(config.POSTGRES_DSN)
     object_store = _wait_for_minio()
 
-    connector = aiohttp.TCPConnector(limit_per_host=2, limit=config.NUM_WORKER_TASKS * 2)
+    connector = aiohttp.TCPConnector(
+        limit_per_host=2, limit=config.NUM_WORKER_TASKS * 2, resolver=SSRFSafeResolver()
+    )
     async with aiohttp.ClientSession(connector=connector) as session:
         worker = CrawlerWorker(redis_client, page_store, object_store, session)
 
